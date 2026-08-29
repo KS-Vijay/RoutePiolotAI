@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RoutePilot AI — Premium Travel Assistant</title>
+    <!-- Leaflet.js Map CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <!-- Custom Style Sheet -->
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Navigation Header -->
+        <header class="app-header">
+            <div class="brand">
+                <i class="fa-solid fa-compass-drafting logo-icon"></i>
+                <div class="brand-text">
+                    <h1>RoutePilot <span class="badge">AI</span></h1>
+                    <p>Agentic Multi-Stop Route Optimizer</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button id="btn-show-saved" class="header-btn" title="View Saved Routes">
+                    <i class="fa-solid fa-bookmark"></i> Saved Routes
+                </button>
+                <div class="server-status">
+                    <span class="status-dot online"></span>
+                    <span class="status-text">Server Online</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Dashboard Content Split Layout -->
+        <main class="app-main">
+            
+            <!-- Left Side: Chat & Instructions Panel -->
+            <section class="left-panel">
+                <div class="panel-header">
+                    <i class="fa-solid fa-robot"></i>
+                    <h2>Agentic Travel Planner</h2>
+                </div>
+                
+                <!-- Chat Window Container -->
+                <div class="chat-container">
+                    <div id="chat-messages" class="chat-messages">
+                        <!-- Default welcome message -->
+                        <div class="chat-message system">
+                            <div class="message-avatar">RP</div>
+                            <div class="message-content">
+                                <p>Welcome to <strong>RoutePilot AI</strong>! I am your agentic travel planner.</p>
+                                <p>Tell me what locations you want to visit and I will call tools to geocode coordinates, calculate distances, and optimize your visit order. For example:</p>
+                                <em>"Plan a route to visit Roorkee, Shimla, and Mandi."</em>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Intermediate Agent Loop Step-thinking Overlay -->
+                    <div id="agent-thinking" class="thinking-box hidden">
+                        <div class="thinking-header">
+                            <span class="pulse-dot"></span>
+                            <span class="thinking-title">Agent Thinking Process</span>
+                            <button id="btn-clear-logs" class="clear-logs-btn" title="Clear Logs"><i class="fa-solid fa-trash-can"></i></button>
+                        </div>
+                        <div id="thinking-logs" class="thinking-logs"></div>
+                    </div>
+                </div>
+
+                <!-- Message input area -->
+                <form id="chat-form" class="chat-input-area">
+                    <input type="text" id="chat-input" placeholder="Ask RoutePilot to plan a trip..." autocomplete="off" required>
+                    <button type="submit" id="chat-send" class="send-btn">
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+                </form>
+            </section>
+
+            <!-- Right Side: Map & Route Details Panel -->
+            <section class="right-panel">
+                
+                <!-- Metrics Bar Overlay -->
+                <div class="metrics-bar">
+                    <div class="metric-card">
+                        <div class="metric-icon distance-color"><i class="fa-solid fa-road"></i></div>
+                        <div class="metric-info">
+                            <span class="metric-label">Total Distance</span>
+                            <span id="metric-distance" class="metric-value">0.00 km</span>
+                        </div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-icon duration-color"><i class="fa-solid fa-clock"></i></div>
+                        <div class="metric-info">
+                            <span class="metric-label">Estimated Drive</span>
+                            <span id="metric-duration" class="metric-value">0 min</span>
+                        </div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-icon stops-color"><i class="fa-solid fa-map-pin"></i></div>
+                        <div class="metric-info">
+                            <span class="metric-label">Planned Stops</span>
+                            <span id="metric-stops" class="metric-value">0 Stops</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Leaflet Interactive Map Container -->
+                <div class="map-wrapper">
+                    <div id="map"></div>
+                </div>
+
+                <!-- Route Controls & Drag-and-Drop Editor -->
+                <div class="itinerary-editor">
+                    <div class="itinerary-header">
+                        <div class="title-with-icon">
+                            <i class="fa-solid fa-route"></i>
+                            <h3>Itinerary Stops Manager</h3>
+                        </div>
+                        <div class="editor-actions">
+                            <button id="btn-optimize-itinerary" class="editor-btn primary-btn" title="Optimize Route (Solve TSP)">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i> Optimize
+                            </button>
+                            <button id="btn-save-itinerary" class="editor-btn" title="Save Route Plan">
+                                <i class="fa-solid fa-circle-check"></i> Save Route
+                            </button>
+                            <button id="btn-clear-itinerary" class="editor-btn danger-btn" title="Clear All Stops">
+                                <i class="fa-solid fa-trash-can"></i> Clear
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Stops Input Add Bar -->
+                    <div class="stop-add-bar">
+                        <input type="text" id="add-stop-input" placeholder="Type a place name (e.g. Red Fort, Delhi) and press enter...">
+                        <button id="btn-add-stop" class="add-btn"><i class="fa-solid fa-plus"></i></button>
+                    </div>
+
+                    <!-- Drag-and-drop Stop List -->
+                    <div class="itinerary-controls">
+                        <div class="constraint-selectors">
+                            <div class="selector-field">
+                                <label for="start-stop-select">Pin Start stop:</label>
+                                <select id="start-stop-select">
+                                    <option value="">None (Auto-pick)</option>
+                                </select>
+                            </div>
+                            <div class="selector-field">
+                                <label for="end-stop-select">Pin End stop:</label>
+                                <select id="end-stop-select">
+                                    <option value="">None (Auto-pick)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <ul id="stops-list" class="stops-list">
+                        <li class="empty-list-placeholder">No stops added. Add stops manually above or chat with the agent to generate an itinerary!</li>
+                    </ul>
+                </div>
+            </section>
+        </main>
+
+        <!-- Saved Routes Drawer Panel (Slide In from Right) -->
+        <div id="saved-drawer" class="drawer-overlay hidden">
+            <div class="drawer-container">
+                <div class="drawer-header">
+                    <h2><i class="fa-solid fa-bookmark"></i> Saved Itineraries</h2>
+                    <button id="btn-close-drawer" class="close-btn"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="drawer-content">
+                    <ul id="saved-routes-list" class="saved-routes-list">
+                        <!-- Loaded dynamically -->
+                        <li class="empty-list-placeholder">No saved route plans found.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Name Route Modal -->
+        <div id="save-modal" class="modal-overlay hidden">
+            <div class="modal-container">
+                <div class="modal-header">
+                    <h3>Save Itinerary</h3>
+                    <button id="btn-close-modal" class="modal-close-btn"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <form id="save-route-form" class="modal-body">
+                    <label for="route-name-input">Route Name</label>
+                    <input type="text" id="route-name-input" placeholder="e.g. My Delhi Weekend Tour" required>
+                    <div class="modal-actions">
+                        <button type="button" id="btn-cancel-save" class="modal-btn">Cancel</button>
+                        <button type="submit" class="modal-btn confirm-btn">Save Plan</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet.js JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- Custom Application Logic -->
+    <script src="/static/app.js"></script>
+</body>
+</html>
