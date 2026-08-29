@@ -263,15 +263,20 @@ def get_saved_routes() -> list[dict]:
 def delete_saved_route(route_id: int) -> bool:
     """Delete a saved route by its ID. Returns True if successful."""
     # TODO: Connect to database, delete from saved_routes where id matches route_id
-    
+    conn=get_connection()
+    cursor=conn.cursor()
+    cursor.execute("""
+    DELETE FROM saved_routes WHERE id=?
+    """,route_id)
     
     # TODO: Check if any row was affected using cursor.rowcount
-    
+    rowcount=cursor.rowcount()
     
     # TODO: Commit and close the connection
+    conn.commit()
+    conn.close()
     
-    
-    return False
+    return bool(rowcount)
 
 
 def log_chat_message(goal: str, response: str) -> None:
@@ -279,23 +284,38 @@ def log_chat_message(goal: str, response: str) -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     # TODO: Connect to database, insert timestamp, goal, response into chat_history
-    
+    conn=get_connection()
+    cursor=conn.cursor()
+    cursor.execute("""
+    INSERT INTO chat_history(timestamp,goal,response)
+    VALUES (?,?,?)
+    """,(timestamp,goal,response))
     
     # TODO: Commit and close connection
-    
-    
-    pass
+    conn.commit()
+    conn.close()
 
 
 def get_chat_history() -> list[dict]:
     """Retrieve all chat logs from chat_history ordered by id ASC."""
     # TODO: Connect to database, select timestamp, goal, response from chat_history ordered by id ASC
-    
+    conn=get_connection()
+    cursor=conn.cursor()
+    cursor.execute("""
+    SELECT timestamp,goal,response FROM chat_history ORDER BY id ASC
+    """)
     
     # TODO: Fetch all and format as list of dicts: [{"timestamp": r[0], "goal": r[1], "response": r[2]}]
-    
+    rows=cursor.fetchall()
+    chat_list=[]
+    for row in rows:
+        chat_list.append({
+            "timestamp":row[0],
+            "goal":row[1],
+            "response":row[2]
+        })
     
     # TODO: Close connection
+    conn.close()
     
-    
-    return []
+    return chat_list
