@@ -208,32 +208,56 @@ def save_route_plan(name: str, stops: list[str], ordered_route: list[str], total
     geometry_json = json.dumps(geometry_list)
     
     # TODO: Connect to database, insert name, created_at, stops_json, ordered_route_json, total_distance, total_duration, geometry_json into saved_routes
-    
+    conn=get_connection()
+    cursor=conn.cursor()
+    cursor.execute("""
+    INSERT INTO saved_routes(name,created_at,stops_json,ordered_route_json,total_distance,total_duration,geometry_json)
+    VALUES(?,?,?,?,?,?,?)
+    """,(name,created_at,stops_json,ordered_route_json,total_distance,total_duration,geometry_json))
     
     # TODO: Get the last inserted ID using cursor.lastrowid
-    
+    route_id=cursor.lastrowid()
+
     
     # TODO: Commit and close the connection
-    
+    conn.commit()
+    conn.close()
     
     # Return the inserted ID (replace 0 with actual ID variable)
-    return 0
+    return route_id
 
 
 def get_saved_routes() -> list[dict]:
     """Retrieve all saved routes from saved_routes ordered by id DESC."""
     # TODO: Connect to database, select all columns from saved_routes sorted by id desc
+    conn=get_connection()
+    cursor=conn.cursor()
+    cursor.execute("""
+    SELECT * FROM saved_routes ORDER BY id DESC
+    """)
     
     
     # TODO: Fetch all rows and construct a list of dicts.
     #       Each dict should have keys: 'id', 'name', 'created_at', 'stops' (list), 'ordered_route' (list), 'total_distance', 'total_duration', 'geometry' (list)
     #       Hint: use json.loads() for stops, ordered_route, and geometry strings.
-    
+    rows=cursor.fetchall()
+    route_dict=[]
+    for row in rows:
+        route_dict.append({
+            "id":row[0],
+            "name":row[1],
+            "created_at":row[2],
+            "stops":json.loads(row[3]),
+            "ordered_route":json.loads(row[4]),
+            "total_distance":row[5],
+            "total_duration":row[6],
+            "geometry":json.loads(row[7])
+        })
     
     # TODO: Close connection
     
-    
-    return []
+    conn.close()
+    return route_dict
 
 
 def delete_saved_route(route_id: int) -> bool:
