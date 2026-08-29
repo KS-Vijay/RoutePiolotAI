@@ -154,14 +154,21 @@ def get_route_from_cache(place_a: str, place_b: str) -> dict | None:
     p2 = max(place_a.strip().lower(), place_b.strip().lower())
     
     # TODO: Connect to database, select distance, duration, and geometry from route_cache where place_a and place_b match
-    
-    
+    conn=get_connection()
+    cursor=conn.cursor()
+    cursor.execute("""
+    SELECT distance, duration, geometry FROM route_cache WHERE place_a=? AND place_b=?
+    """,(p1,p2))
     # TODO: Fetch the result. If found, load the geometry JSON string back into a Python list:
     #       geometry_list = json.loads(row[2])
     #       Return a dictionary: {"distance": row[0], "duration": row[1], "geometry": geometry_list}
-    
+    row=cursor.fetchone()
+    if(row):
+        geometry_list=json.loads(row[2])
+        return {"distance":row[0],"duration":row[1],"geometry":geometry_list}
     
     # TODO: Close connection
+    conn.close()
     
     
     return None
@@ -177,10 +184,15 @@ def save_route_to_cache(place_a: str, place_b: str, distance: float, duration: f
     geometry_json = json.dumps(geometry_list)
     
     # TODO: Connect to database, insert or replace p1, p2, distance, duration, geometry_json into route_cache
-    
+    conn=get_connection()
+    cursor=conn.cursor()
+    cursor.execute("""
+    INSERT OR REPLACE INTO route_cache(place_a,place_b,distance,duration,geometry) VALUES(?,?,?,?,?)
+    """,(p1,p2,distance,duration,geometry_json))
     
     # TODO: Commit and close the connection
-    
+    conn.commit()
+    conn.close()
     
     pass
 
