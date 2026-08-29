@@ -59,6 +59,82 @@ def get_dashboard():
         return FileResponse(static_index)
     return {"message": "RoutePilot AI API active. Create static/index.html to view dashboard."}
 
+# Endpoint to geocode a single place name → coordinates (used by frontend for marker placement)
+@app.get("/api/geocode")
+def get_geocode(place: str):
+    try:
+        from tools.route_tools import get_coordinates
+        lat, lon = get_coordinates(place)
+        return {"place": place, "lat": lat, "lon": lon}
+    except Exception as error:
+        raise HTTPException(status_code=404, detail=str(error))
+
+# Endpoint to get LLM-suggested nearby POIs along the optimized route
+class SuggestionsRequest(BaseModel):
+    ordered_route: List[str]
+
+@app.post("/api/suggestions")
+def post_suggestions(data: SuggestionsRequest):
+    import json as _json
+    from openai import OpenAI
+    from tools.route_tools import get_coordinates
+
+    route = data.ordered_route
+    if not route or len(route) < 1:
+        return []
+
+    # Ask LLM for worthy nearby places along this route
+    try:
+        llm = OpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=os.getenv("GROQ_API_KEY"),
+        )
+        route_str = " → ".join(route)
+        prompt = (
+            f"A traveller is visiting: {route_str}.\n\n"
+            "Suggest exactly 4 additional worthy places to visit that are near or along this route "
+            "(museums, monuments, parks, viewpoints, local markets, etc). "
+            "Do NOT include the places already in the route.\n\n"
+            "Reply ONLY with a valid JSON array of objects, no markdown, no explanation. "
+            'Each object must have exactly these three string fields: "name", "category", "reason".\n'
+            'Example: [{"name": "Humayun\'s Tomb, Delhi", "category": "Monument", "reason": "Close to India Gate, stunning Mughal architecture"}]'
+        )
+        response = llm.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=400,
+            temperature=0.4,
+        )
+        raw = response.choices[0].message.content.strip()
+        # Strip markdown code fences if present
+        raw = raw.strip("`").strip()
+        if raw.startswith("json"):
+            raw = raw[4:].strip()
+        suggestions_raw = _json.loads(raw)
+    except Exception as e:
+        print(f"[Suggestions] LLM error: {e}")
+        return []
+
+    # Geocode each suggestion; skip ones Nominatim can't find
+    results = []
+    for item in suggestions_raw[:5]:
+        try:
+            name = item.get("name", "").strip()
+            if not name:
+                continue
+            lat, lon = get_coordinates(name)
+            results.append({
+                "name": name,
+                "category": item.get("category", "Place"),
+                "reason": item.get("reason", ""),
+                "lat": lat,
+                "lon": lon,
+            })
+        except Exception:
+            pass  # skip un-geocodable suggestions silently
+
+    return results
+
 # Endpoint to chat with RoutePilot agent
 @app.post("/api/chat")
 def post_chat(data: ChatRequest):

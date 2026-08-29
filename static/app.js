@@ -6,6 +6,8 @@ let routeDetails = null;
 let map = null;
 let routePolyline = null;
 let markersGroup = null;
+let optimizationEpoch = 0;
+let routeIsOptimized = false; // true only after the user explicitly clicks Optimize
 
 // DOM Elements
 const stopsList = document.getElementById("stops-list");
@@ -56,11 +58,10 @@ function initMap() {
         fadeAnimation: true
     }).setView([28.6139, 77.2090], 11);
 
-    // Load CartoDB Dark Matter tiles for a high-fidelity dark UI look
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains: 'abcd',
-        maxZoom: 20
+    // Load standard OpenStreetMap tiles (which we invert to dark mode using CSS filter in style.css)
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 19
     }).addTo(map);
 
     markersGroup = L.layerGroup().addTo(map);
@@ -120,7 +121,9 @@ async function loadSessionMemory() {
             const data = await response.json();
             if (data.planned_route && data.planned_route.length > 0) {
                 stops = data.planned_route;
+                routeIsOptimized = true;
                 updateStopsUI();
+                // Agent already solved TSP — show the optimized route
                 optimizeItinerary();
             }
         }
@@ -129,7 +132,7 @@ async function loadSessionMemory() {
     }
 }
 
-// Add a stop manually using input box
+// Add a stop manually using input box — only place a marker, do NOT run TSP
 function addStopFromInput() {
     const val = addStopInput.value.trim();
     if (!val) return;
@@ -141,8 +144,9 @@ function addStopFromInput() {
     
     stops.push(val);
     addStopInput.value = "";
-    updateStopsUI();
-    optimizeItinerary();
+    routeIsOptimized = false; // new stop means route needs re-optimization
+    updateStopsUI();           // rebuild the list UI
+    placeSingleMarker(val);    // just geocode and drop a pin — no routing
 }
 
 // Update the stops list interface and dropdown options
@@ -176,12 +180,18 @@ function updateStopsUI() {
             </div>
         `;
         
-        // Remove item button click
+        // Remove item — clear route line, keep remaining markers
         li.querySelector(".stop-delete-btn").addEventListener("click", (e) => {
             const idx = parseInt(e.currentTarget.getAttribute("data-index"));
             stops.splice(idx, 1);
+            routeIsOptimized = false;
+            // Clear the drawn route line since order may have changed
+            if (routePolyline) { map.removeLayer(routePolyline); routePolyline = null; }
+            routeDetails = null;
+            metricDistance.textContent = "0.00 km";
+            metricDuration.textContent = "0 min";
             updateStopsUI();
-            optimizeItinerary();
+            redrawAllMarkers(); // replot remaining markers with no route line
         });
         
         stopsList.appendChild(li);
@@ -215,7 +225,10 @@ function updateDropdowns() {
 }
 
 function updateConstraintSelections() {
-    optimizeItinerary();
+    // Only re-run TSP if the user already optimized — otherwise just note the preference
+    if (routeIsOptimized) {
+        optimizeItinerary();
+    }
 }
 
 // HTML5 Drag and Drop logic for list reordering
@@ -270,8 +283,14 @@ function handleDrop(e) {
         stops.splice(srcIdx, 1);
         stops.splice(targetIdx, 0, temp);
         
+        // Dragging is manual reorder — mark as not optimized, clear route line
+        routeIsOptimized = false;
+        if (routePolyline) { map.removeLayer(routePolyline); routePolyline = null; }
+        routeDetails = null;
+        metricDistance.textContent = "0.00 km";
+        metricDuration.textContent = "0 min";
         updateStopsUI();
-        optimizeItinerary();
+        redrawAllMarkers();
     }
     return false;
 }
@@ -288,6 +307,7 @@ function handleDragEnd(e) {
 function clearItinerary() {
     stops = [];
     routeDetails = null;
+    routeIsOptimized = false;
     updateStopsUI();
     
     // Clear map layers
@@ -302,15 +322,59 @@ function clearItinerary() {
     metricDuration.textContent = "0 min";
 }
 
-// Call direct optimization endpoint (TSP solver)
+// Geocode a single place and drop a pin on the map (no route line)
+async function placeSingleMarker(placeName) {
+    try {
+        const response = await fetch(`/api/geocode?place=${encodeURIComponent(placeName)}`);
+        if (!response.ok) {
+            console.warn(`Could not geocode: ${placeName}`);
+            return;
+        }
+        const data = await response.json();
+        const coords = [data.lat, data.lon];
+        const idx = stops.indexOf(placeName);
+        
+        let markerColor = "#4facfe";
+        if (idx === 0) markerColor = "#00f2fe";
+        else if (idx === stops.length - 1) markerColor = "#6c5ce7";
+        
+        const customIcon = L.divIcon({
+            html: `<div style="width:14px;height:14px;background-color:${markerColor};border:2px solid #fff;border-radius:50%;box-shadow:0 0 10px ${markerColor};"></div>`,
+            className: 'custom-map-marker',
+            iconSize: [14, 14],
+            iconAnchor: [7, 7]
+        });
+        
+        L.marker(coords, { icon: customIcon })
+            .bindPopup(`<strong>Stop ${idx + 1}:</strong> ${placeName}`)
+            .addTo(markersGroup);
+            
+        map.setView(coords, Math.max(map.getZoom(), 10));
+    } catch (err) {
+        console.error("placeSingleMarker failed:", err);
+    }
+}
+
+// Redraw all stop markers from geocode cache without drawing a route line
+async function redrawAllMarkers() {
+    markersGroup.clearLayers();
+    for (const stop of stops) {
+        await placeSingleMarker(stop);
+    }
+}
+
+// Call direct optimization endpoint (TSP solver) — triggered only by Optimize button or agent
 async function optimizeItinerary() {
+    optimizationEpoch++;
+    const currentEpoch = optimizationEpoch;
+
     if (stops.length < 2) {
         // Clear map line, keep markers if any
         if (routePolyline) {
             map.removeLayer(routePolyline);
             routePolyline = null;
         }
-        drawMarkers();
+        drawMarkers(currentEpoch);
         return;
     }
     
@@ -334,7 +398,12 @@ async function optimizeItinerary() {
         }
         
         const data = await response.json();
+        
+        // Ignore response if a newer optimization has been triggered
+        if (currentEpoch !== optimizationEpoch) return;
+        
         routeDetails = data;
+        routeIsOptimized = true;
         
         // Update metric values
         metricDistance.textContent = `${data.total_distance.toFixed(2)} km`;
@@ -356,11 +425,13 @@ async function optimizeItinerary() {
         renderStopsListSilently();
         
         // Draw route path on map
-        drawRoute(data.geometry, data.segments);
+        drawRoute(data.geometry, data.segments, currentEpoch);
         
     } catch (err) {
-        console.error("Route Optimization Error:", err);
-        alert("Could not calculate route: " + err.message);
+        if (currentEpoch === optimizationEpoch) {
+            console.error("Route Optimization Error:", err);
+            alert("Could not calculate route: " + err.message);
+        }
     }
 }
 
@@ -401,7 +472,8 @@ function renderStopsListSilently() {
 }
 
 // Draw Markers for stops on Leaflet Map
-function drawMarkers() {
+function drawMarkers(epoch = optimizationEpoch) {
+    if (epoch !== optimizationEpoch) return;
     markersGroup.clearLayers();
     if (stops.length === 0) return;
     
@@ -409,6 +481,7 @@ function drawMarkers() {
         try {
             // Geocode place name (will check cache on server)
             const coords = await geocodePlace(stop);
+            if (epoch !== optimizationEpoch) return; // Ignore if epoch changed while geocoding
             if (coords) {
                 // Determine marker color
                 let markerColor = "#4facfe"; // cyan/blue
@@ -493,13 +566,15 @@ async function geocodePlace(placeName) {
 }
 
 // Draw polyline routes and fit bounds
-function drawRoute(geometry, segments) {
+function drawRoute(geometry, segments, epoch = optimizationEpoch) {
+    if (epoch !== optimizationEpoch) return;
+    
     if (routePolyline) {
         map.removeLayer(routePolyline);
     }
     
     // Draw markers
-    drawMarkers();
+    drawMarkers(epoch);
     
     if (!geometry || geometry.length === 0) return;
     

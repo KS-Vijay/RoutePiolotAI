@@ -107,40 +107,32 @@ def init_db():
 def get_coordinates_from_cache(place_name: str) -> tuple[float, float] | None:
     """Retrieve latitude and longitude for a place name from geocoding_cache."""
     key = place_name.strip().lower()
-    # TODO: Connect to database, select lat and lon where place_name matches key
-    conn=get_connection()
-    cursor=conn.cursor()
-    cursor.execute("""
-    SELECT lat,lon FROM geocoding_cache where place_name=?
-    """,(key,))
-    
-    # TODO: Fetch the first result. If found, return (lat, lon)
-    row=cursor.fetchone()
-    if(row):
-        return row[0],row[1]
-    
-    # TODO: Make sure to close the connection when done
-    conn.close()
-    
-    
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+        SELECT lat,lon FROM geocoding_cache WHERE place_name=?
+        """, (key,))
+        row = cursor.fetchone()
+        if row:
+            return row[0], row[1]
+    finally:
+        conn.close()
     return None
 
 
 def save_coordinates_to_cache(place_name: str, lat: float, lon: float) -> None:
     """Save place name and its coordinates into geocoding_cache."""
     key = place_name.strip().lower()
-    # TODO: Connect to database, insert or replace key, lat, lon into geocoding_cache
-    conn=get_connection()
-    cursor=conn.cursor()
-    cursor.execute("""
-    INSERT OR REPLACE INTO geocoding_cache(place_name,lat,lon) VALUES(?,?,?)
-    """,key,lat,lon)
-    
-    # TODO: Commit and close the connection
-    conn.commit()
-    conn.close()
-    
-    pass
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+        INSERT OR REPLACE INTO geocoding_cache(place_name,lat,lon) VALUES(?,?,?)
+        """, (key, lat, lon))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def get_route_from_cache(place_a: str, place_b: str) -> dict | None:
@@ -148,53 +140,37 @@ def get_route_from_cache(place_a: str, place_b: str) -> dict | None:
     Retrieve cached route details between place_a and place_b.
     Returns a dict with 'distance', 'duration', and 'geometry' (list of lists) if found, else None.
     """
-    # Normalize order so we can query bi-directionally (A->B or B->A)
-    # Hint: sort the names alphabetically
     p1 = min(place_a.strip().lower(), place_b.strip().lower())
     p2 = max(place_a.strip().lower(), place_b.strip().lower())
-    
-    # TODO: Connect to database, select distance, duration, and geometry from route_cache where place_a and place_b match
-    conn=get_connection()
-    cursor=conn.cursor()
-    cursor.execute("""
-    SELECT distance, duration, geometry FROM route_cache WHERE place_a=? AND place_b=?
-    """,(p1,p2))
-    # TODO: Fetch the result. If found, load the geometry JSON string back into a Python list:
-    #       geometry_list = json.loads(row[2])
-    #       Return a dictionary: {"distance": row[0], "duration": row[1], "geometry": geometry_list}
-    row=cursor.fetchone()
-    if(row):
-        geometry_list=json.loads(row[2])
-        return {"distance":row[0],"duration":row[1],"geometry":geometry_list}
-    
-    # TODO: Close connection
-    conn.close()
-    
-    
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+        SELECT distance, duration, geometry FROM route_cache WHERE place_a=? AND place_b=?
+        """, (p1, p2))
+        row = cursor.fetchone()
+        if row:
+            geometry_list = json.loads(row[2])
+            return {"distance": row[0], "duration": row[1], "geometry": geometry_list}
+    finally:
+        conn.close()
     return None
 
 
 def save_route_to_cache(place_a: str, place_b: str, distance: float, duration: float, geometry_list: list[list[float]]) -> None:
     """Save route details between place_a and place_b into route_cache."""
-    # Normalize order
     p1 = min(place_a.strip().lower(), place_b.strip().lower())
     p2 = max(place_a.strip().lower(), place_b.strip().lower())
-    
-    # Convert geometry list of coordinates to a JSON string
     geometry_json = json.dumps(geometry_list)
-    
-    # TODO: Connect to database, insert or replace p1, p2, distance, duration, geometry_json into route_cache
-    conn=get_connection()
-    cursor=conn.cursor()
-    cursor.execute("""
-    INSERT OR REPLACE INTO route_cache(place_a,place_b,distance,duration,geometry) VALUES(?,?,?,?,?)
-    """,(p1,p2,distance,duration,geometry_json))
-    
-    # TODO: Commit and close the connection
-    conn.commit()
-    conn.close()
-    
-    pass
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+        INSERT OR REPLACE INTO route_cache(place_a,place_b,distance,duration,geometry) VALUES(?,?,?,?,?)
+        """, (p1, p2, distance, duration, geometry_json))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def save_route_plan(name: str, stops: list[str], ordered_route: list[str], total_distance: float, total_duration: float, geometry_list: list[list[float]]) -> int:
@@ -207,23 +183,18 @@ def save_route_plan(name: str, stops: list[str], ordered_route: list[str], total
     ordered_route_json = json.dumps(ordered_route)
     geometry_json = json.dumps(geometry_list)
     
-    # TODO: Connect to database, insert name, created_at, stops_json, ordered_route_json, total_distance, total_duration, geometry_json into saved_routes
-    conn=get_connection()
-    cursor=conn.cursor()
-    cursor.execute("""
-    INSERT INTO saved_routes(name,created_at,stops_json,ordered_route_json,total_distance,total_duration,geometry_json)
-    VALUES(?,?,?,?,?,?,?)
-    """,(name,created_at,stops_json,ordered_route_json,total_distance,total_duration,geometry_json))
-    
-    # TODO: Get the last inserted ID using cursor.lastrowid
-    route_id=cursor.lastrowid()
-
-    
-    # TODO: Commit and close the connection
-    conn.commit()
-    conn.close()
-    
-    # Return the inserted ID (replace 0 with actual ID variable)
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+        INSERT INTO saved_routes(name,created_at,stops,ordered_route,total_distance,total_duration,geometry)
+        VALUES(?,?,?,?,?,?,?)
+        """, (name, created_at, stops_json, ordered_route_json, total_distance, total_duration, geometry_json))
+        route_id = cursor.lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+        
     return route_id
 
 
@@ -262,20 +233,16 @@ def get_saved_routes() -> list[dict]:
 
 def delete_saved_route(route_id: int) -> bool:
     """Delete a saved route by its ID. Returns True if successful."""
-    # TODO: Connect to database, delete from saved_routes where id matches route_id
-    conn=get_connection()
-    cursor=conn.cursor()
-    cursor.execute("""
-    DELETE FROM saved_routes WHERE id=?
-    """,route_id)
-    
-    # TODO: Check if any row was affected using cursor.rowcount
-    rowcount=cursor.rowcount()
-    
-    # TODO: Commit and close the connection
-    conn.commit()
-    conn.close()
-    
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+        DELETE FROM saved_routes WHERE id=?
+        """, (route_id,))
+        rowcount = cursor.rowcount
+        conn.commit()
+    finally:
+        conn.close()
     return bool(rowcount)
 
 

@@ -25,6 +25,40 @@ _route_details_cache = {}
 REQUEST_TIMEOUT = 10
 
 
+def correct_spelling_with_llm(place_name: str) -> str:
+    """Uses the LLM to correct spelling or typos in a place name."""
+    try:
+        # Import here to avoid circular dependencies
+        from main import client, MODEL
+        if not client:
+            from openai import OpenAI
+            client = OpenAI(
+                base_url="https://api.groq.com/openai/v1",
+                api_key=os.getenv("GROQ_API_KEY"),
+            )
+            MODEL = "openai/gpt-oss-120b"
+            
+        system_content = (
+            "You are a spelling correction service. The user provided a place name that "
+            "could not be found on maps. Suggest the correct name of the location. "
+            "Return ONLY the corrected location name, with no other text, formatting, or explanation. "
+            "If the spelling seems correct or you are unsure, return the input verbatim."
+        )
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": place_name}
+            ],
+            max_tokens=30,
+            temperature=0.0
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as error:
+        print(f"[LLM Warning] Could not correct spelling using LLM: {error}")
+        return place_name
+
+
 def get_coordinates(place_name: str) -> tuple[float, float]:
     """Turn a place name into latitude and longitude using Nominatim, with SQLite caching."""
     key = place_name.strip().lower()
@@ -62,6 +96,36 @@ def get_coordinates(place_name: str) -> tuple[float, float]:
         ) from error
 
     if not data:
+        # Query LLM for spelling correction suggestion
+        print(f"Location '{place_name}' not found. Asking LLM for spelling suggestion...")
+        corrected = correct_spelling_with_llm(place_name)
+        if corrected and corrected.strip().lower() != key:
+            print(f"LLM suggested corrected location: '{corrected}'")
+            try:
+                time.sleep(1)
+                response = requests.get(
+                    url,
+                    params={"q": corrected, "format": "json", "limit": 1},
+                    headers=headers,
+                    timeout=REQUEST_TIMEOUT,
+                )
+                response.raise_for_status()
+                data = response.json()
+                if data:
+                    # Save both original input and corrected name to cache to avoid double LLM hits
+                    coordinates = (float(data[0]["lat"]), float(data[0]["lon"]))
+                    _coord_cache[key] = coordinates
+                    _coord_cache[corrected.strip().lower()] = coordinates
+                    if db:
+                        try:
+                            db.save_coordinates_to_cache(place_name, coordinates[0], coordinates[1])
+                            db.save_coordinates_to_cache(corrected, coordinates[0], coordinates[1])
+                        except Exception:
+                            pass
+                    return coordinates
+            except Exception as retry_err:
+                print(f"[Warning] Geocoding retry failed: {retry_err}")
+                
         raise ValueError(
             f"Could not find location: '{place_name}'. Try a more specific name."
         )
@@ -77,6 +141,7 @@ def get_coordinates(place_name: str) -> tuple[float, float]:
             print(f"[DB Warning] Could not write geocoding cache: {error}")
 
     return coordinates
+
 
 
 def get_route_details(place_a: str, place_b: str) -> dict:

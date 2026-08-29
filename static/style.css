@@ -537,7 +537,12 @@ body {
 
 /* Customize Leaflet elements to match dark theme */
 .leaflet-container {
-    background: #11151c !important;
+    background: #090c12 !important;
+}
+
+.leaflet-tile {
+    /* CSS filter hack: Invert light OSM tiles to create a watermark-free dark theme */
+    filter: invert(100%) hue-rotate(180deg) brightness(85%) contrast(90%);
 }
 
 .leaflet-bar a {
